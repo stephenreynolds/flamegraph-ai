@@ -36,6 +36,16 @@ export interface FlamegraphAnalysis {
   };
 }
 
+export interface AnalysisListItem {
+  analysisId: string;
+  profileName: string;
+  generatedAt: string;
+  totalSamples: number;
+  profileCount: number;
+  topHotspots: Hotspot[];
+}
+
 export const API_ROUTES = {
-  analyze: "/api/analyze"
+  analyze: "/api/analyze",
+  analyses: "/api/analyses"
 } as const;

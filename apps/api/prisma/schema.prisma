@@ -29,15 +29,17 @@ model Analysis {
 }
 
 model Hotspot {
-  id          String   @id @default(cuid())
-  analysisId  String
-  analysis    Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
-  name        String
-  file        String
-  selfTimeMs  Int
-  totalTimeMs Int
-  sampleCount Int
-  rank        Int
+  id           String   @id @default(cuid())
+  analysisId   String
+  analysis     Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  name         String
+  file         String
+  selfTimeMs   Float
+  totalTimeMs  Float
+  sampleCount  Int
+  inclusivePct Float
+  exclusivePct Float
+  rank         Int
 
   @@index([analysisId])
 }
@@ -51,6 +53,7 @@ model Recommendation {
   rationale  String
   impact     String
   effort     String
+  confidence Float
   sortOrder  Int
 
   @@index([analysisId])

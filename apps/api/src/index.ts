@@ -1,8 +1,8 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
-import { randomUUID } from "crypto";
-import type { FlamegraphAnalysis, Recommendation } from "@flamegraph-ai/shared";
+import type { AnalysisListItem, FlamegraphAnalysis, Recommendation } from "@flamegraph-ai/shared";
+import { prisma } from "./lib/prisma";
 import { isSpeedscopeParseError, parseSpeedscopeProfile } from "./parser/speedscope";
 
 const app = Fastify({ logger: true });
@@ -42,20 +42,93 @@ app.post("/api/analyze", async (request, reply) => {
   try {
     const parsed = parseSpeedscopeProfile(payload);
     const recommendations = buildRecommendations(parsed.hotspots);
+    const orderedRecommendations = [...recommendations.quickWins, ...recommendations.deepRefactors];
 
-    const analysis: FlamegraphAnalysis = {
-      analysisId: randomUUID(),
-      profileName: file.filename,
-      generatedAt: new Date().toISOString(),
-      summary: {
-        totalSamples: parsed.totalSamples,
-        profileCount: parsed.profileCount
+    const created = await prisma.profile.create({
+      data: {
+        filename: file.filename,
+        rawJson: payload as object,
+        analyses: {
+          create: {
+            totalSamples: parsed.totalSamples,
+            profileCount: parsed.profileCount,
+            hotspots: {
+              create: parsed.hotspots.map((hotspot) => ({
+                name: hotspot.name,
+                file: hotspot.file,
+                selfTimeMs: hotspot.selfTimeMs,
+                totalTimeMs: hotspot.totalTimeMs,
+                sampleCount: hotspot.sampleCount,
+                inclusivePct: hotspot.inclusivePct,
+                exclusivePct: hotspot.exclusivePct,
+                rank: hotspot.rank
+              }))
+            },
+            recommendations: {
+              create: orderedRecommendations.map((item, idx) => ({
+                tier: item.tier,
+                title: item.title,
+                rationale: item.rationale,
+                impact: item.impact,
+                effort: item.effort,
+                confidence: item.confidence,
+                sortOrder: idx
+              }))
+            }
+          }
+        }
       },
-      hotspots: parsed.hotspots,
-      recommendations
-    };
+      include: {
+        analyses: {
+          take: 1,
+          include: {
+            hotspots: {
+              orderBy: {
+                rank: "asc"
+              }
+            },
+            recommendations: {
+              orderBy: {
+                sortOrder: "asc"
+              }
+            }
+          }
+        }
+      }
+    });
 
-    return reply.send(analysis);
+    const analysis = created.analyses[0];
+
+    return reply.send({
+      analysisId: analysis.id,
+      profileName: created.filename,
+      generatedAt: analysis.createdAt.toISOString(),
+      summary: {
+        totalSamples: analysis.totalSamples,
+        profileCount: analysis.profileCount
+      },
+      hotspots: analysis.hotspots.map((hotspot) => ({
+        name: hotspot.name,
+        file: hotspot.file,
+        selfTimeMs: hotspot.selfTimeMs,
+        totalTimeMs: hotspot.totalTimeMs,
+        sampleCount: hotspot.sampleCount,
+        inclusivePct: hotspot.inclusivePct,
+        exclusivePct: hotspot.exclusivePct,
+        rank: hotspot.rank
+      })),
+      recommendations: splitRecommendations(
+        analysis.recommendations.map((item) => ({
+          id: item.id,
+          tier: item.tier,
+          title: item.title,
+          rationale: item.rationale,
+          impact: item.impact as Recommendation["impact"],
+          effort: item.effort as Recommendation["effort"],
+          confidence: item.confidence
+        }))
+      )
+    } satisfies FlamegraphAnalysis);
   } catch (error) {
     if (isSpeedscopeParseError(error)) {
       return reply.status(400).send({ error: (error as Error).message });
@@ -63,6 +136,109 @@ app.post("/api/analyze", async (request, reply) => {
 
     request.log.error(error);
     return reply.status(500).send({ error: "Failed to analyze profile" });
+  }
+});
+
+app.get("/api/analyses", async (request, reply) => {
+  try {
+    const analyses = await prisma.analysis.findMany({
+      orderBy: {
+        createdAt: "desc"
+      },
+      include: {
+        profile: true,
+        hotspots: {
+          orderBy: {
+            rank: "asc"
+          },
+          take: 3
+        }
+      }
+    });
+
+    const results: AnalysisListItem[] = analyses.map((analysis) => ({
+      analysisId: analysis.id,
+      profileName: analysis.profile.filename,
+      generatedAt: analysis.createdAt.toISOString(),
+      totalSamples: analysis.totalSamples,
+      profileCount: analysis.profileCount,
+      topHotspots: analysis.hotspots.map((hotspot) => ({
+        name: hotspot.name,
+        file: hotspot.file,
+        selfTimeMs: hotspot.selfTimeMs,
+        totalTimeMs: hotspot.totalTimeMs,
+        sampleCount: hotspot.sampleCount,
+        inclusivePct: hotspot.inclusivePct,
+        exclusivePct: hotspot.exclusivePct,
+        rank: hotspot.rank
+      }))
+    }));
+
+    return reply.send(results);
+  } catch (error) {
+    request.log.error(error);
+    return reply.status(500).send({ error: "Failed to fetch analyses" });
+  }
+});
+
+app.get("/api/analyses/:id", async (request, reply) => {
+  const { id } = request.params as { id: string };
+
+  try {
+    const analysis = await prisma.analysis.findUnique({
+      where: { id },
+      include: {
+        profile: true,
+        hotspots: {
+          orderBy: {
+            rank: "asc"
+          }
+        },
+        recommendations: {
+          orderBy: {
+            sortOrder: "asc"
+          }
+        }
+      }
+    });
+
+    if (!analysis) {
+      return reply.status(404).send({ error: "Analysis not found" });
+    }
+
+    return reply.send({
+      analysisId: analysis.id,
+      profileName: analysis.profile.filename,
+      generatedAt: analysis.createdAt.toISOString(),
+      summary: {
+        totalSamples: analysis.totalSamples,
+        profileCount: analysis.profileCount
+      },
+      hotspots: analysis.hotspots.map((hotspot) => ({
+        name: hotspot.name,
+        file: hotspot.file,
+        selfTimeMs: hotspot.selfTimeMs,
+        totalTimeMs: hotspot.totalTimeMs,
+        sampleCount: hotspot.sampleCount,
+        inclusivePct: hotspot.inclusivePct,
+        exclusivePct: hotspot.exclusivePct,
+        rank: hotspot.rank
+      })),
+      recommendations: splitRecommendations(
+        analysis.recommendations.map((item) => ({
+          id: item.id,
+          tier: item.tier,
+          title: item.title,
+          rationale: item.rationale,
+          impact: item.impact as Recommendation["impact"],
+          effort: item.effort as Recommendation["effort"],
+          confidence: item.confidence
+        }))
+      )
+    } satisfies FlamegraphAnalysis);
+  } catch (error) {
+    request.log.error(error);
+    return reply.status(500).send({ error: "Failed to fetch analysis" });
   }
 });
 
@@ -123,6 +299,13 @@ function buildRecommendations(hotspots: FlamegraphAnalysis["hotspots"]): Flamegr
   ];
 
   return { quickWins, deepRefactors };
+}
+
+function splitRecommendations(items: Recommendation[]): FlamegraphAnalysis["recommendations"] {
+  return {
+    quickWins: items.filter((item) => item.tier === "quick_win"),
+    deepRefactors: items.filter((item) => item.tier === "deep_refactor")
+  };
 }
 
 function confidenceFromPct(value: number, max: number): number {
