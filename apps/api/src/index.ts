@@ -2,7 +2,8 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import { randomUUID } from "crypto";
-import type { FlamegraphAnalysis, Hotspot } from "@flamegraph-ai/shared";
+import type { FlamegraphAnalysis, Recommendation } from "@flamegraph-ai/shared";
+import { isSpeedscopeParseError, parseSpeedscopeProfile } from "./parser/speedscope";
 
 const app = Fastify({ logger: true });
 
@@ -38,101 +39,95 @@ app.post("/api/analyze", async (request, reply) => {
     return reply.status(400).send({ error: "Uploaded file is not valid JSON" });
   }
 
-  const analysis = createMockAnalysis(payload, file.filename);
-  return reply.send(analysis);
+  try {
+    const parsed = parseSpeedscopeProfile(payload);
+    const recommendations = buildRecommendations(parsed.hotspots);
+
+    const analysis: FlamegraphAnalysis = {
+      analysisId: randomUUID(),
+      profileName: file.filename,
+      generatedAt: new Date().toISOString(),
+      summary: {
+        totalSamples: parsed.totalSamples,
+        profileCount: parsed.profileCount
+      },
+      hotspots: parsed.hotspots,
+      recommendations
+    };
+
+    return reply.send(analysis);
+  } catch (error) {
+    if (isSpeedscopeParseError(error)) {
+      return reply.status(400).send({ error: (error as Error).message });
+    }
+
+    request.log.error(error);
+    return reply.status(500).send({ error: "Failed to analyze profile" });
+  }
 });
 
-function createMockAnalysis(profileJson: unknown, filename: string): FlamegraphAnalysis {
-  const obj = (profileJson as Record<string, unknown>) ?? {};
-  const shared = (obj.shared as Record<string, unknown>) ?? {};
-  const frames = (shared.frames as Array<Record<string, unknown>>) ?? [];
-  const profiles = (obj.profiles as Array<Record<string, unknown>>) ?? [];
+function buildRecommendations(hotspots: FlamegraphAnalysis["hotspots"]): FlamegraphAnalysis["recommendations"] {
+  const top = hotspots[0];
+  const second = hotspots[1];
+  const third = hotspots[2];
 
-  const hotspots: Hotspot[] = frames.slice(0, 5).map((frame, idx) => {
-    const frameName = String(frame.name ?? `frame_${idx + 1}`);
-    const fileName = String(frame.file ?? "unknown");
-    const sampleCount = Math.max(40 - idx * 7, 8);
-    const totalTimeMs = sampleCount * 3;
-
-    return {
-      name: frameName,
-      file: fileName,
-      selfTimeMs: Math.round(totalTimeMs * 0.55),
-      totalTimeMs,
-      sampleCount,
-      rank: idx + 1
-    };
-  });
-
-  const fallbackHotspots: Hotspot[] = [
+  const quickWins: Recommendation[] = [
     {
-      name: "renderFlamegraph",
-      file: "src/render/flamegraph.ts",
-      selfTimeMs: 124,
-      totalTimeMs: 288,
-      sampleCount: 96,
-      rank: 1
+      id: "qw-1",
+      tier: "quick_win",
+      title: `Reduce self-time in ${top?.name ?? "top hotspot"}`,
+      rationale: top
+        ? `${top.name} has ${top.exclusivePct}% exclusive time, suggesting isolated compute that can be memoized or cached first.`
+        : "Focus on the highest exclusive-time hotspot first.",
+      impact: top && top.exclusivePct >= 20 ? "high" : "medium",
+      effort: "small",
+      confidence: confidenceFromPct(top?.exclusivePct ?? 10, 30)
     },
     {
-      name: "aggregateStacks",
-      file: "src/analysis/aggregate.ts",
-      selfTimeMs: 88,
-      totalTimeMs: 203,
-      sampleCount: 68,
-      rank: 2
+      id: "qw-2",
+      tier: "quick_win",
+      title: `Trim call-path overhead around ${second?.name ?? "secondary hotspot"}`,
+      rationale: second
+        ? `${second.name} appears in ${second.inclusivePct}% of total time, so reducing invocation count should cut overall latency.`
+        : "Target the second-ranked hotspot and reduce frequency of execution.",
+      impact: second && second.inclusivePct >= 20 ? "medium" : "low",
+      effort: "small",
+      confidence: confidenceFromPct(second?.inclusivePct ?? 8, 35)
     }
   ];
 
-  const mergedHotspots = hotspots.length > 0 ? hotspots : fallbackHotspots;
-
-  return {
-    analysisId: randomUUID(),
-    profileName: filename,
-    generatedAt: new Date().toISOString(),
-    summary: {
-      totalSamples: mergedHotspots.reduce((sum, item) => sum + item.sampleCount, 0),
-      profileCount: profiles.length || 1
+  const deepRefactors: Recommendation[] = [
+    {
+      id: "dr-1",
+      tier: "deep_refactor",
+      title: `Refactor hotspot pipeline led by ${top?.name ?? "top hotspot"}`,
+      rationale: top
+        ? `${top.name} dominates with ${top.inclusivePct}% inclusive time, indicating architectural pressure in this path.`
+        : "Restructure the highest inclusive-time path to reduce total work.",
+      impact: "high",
+      effort: "large",
+      confidence: confidenceFromPct(top?.inclusivePct ?? 15, 40)
     },
-    hotspots: mergedHotspots,
-    recommendations: {
-      quickWins: [
-        {
-          id: "qw-1",
-          tier: "quick_win",
-          title: "Cache parsed frame lookups",
-          rationale: "Repeated frame metadata access appears in the hottest call paths.",
-          impact: "medium",
-          effort: "small"
-        },
-        {
-          id: "qw-2",
-          tier: "quick_win",
-          title: "Skip low-value stack expansion",
-          rationale: "Avoiding expansion under a threshold reduces per-request CPU for noisy traces.",
-          impact: "low",
-          effort: "small"
-        }
-      ],
-      deepRefactors: [
-        {
-          id: "dr-1",
-          tier: "deep_refactor",
-          title: "Move aggregation to streaming pipeline",
-          rationale: "Chunked processing can prevent expensive full-profile in-memory aggregation.",
-          impact: "high",
-          effort: "large"
-        },
-        {
-          id: "dr-2",
-          tier: "deep_refactor",
-          title: "Pre-index frame relationships",
-          rationale: "An index structure would lower complexity of repeated parent-child traversals.",
-          impact: "high",
-          effort: "medium"
-        }
-      ]
+    {
+      id: "dr-2",
+      tier: "deep_refactor",
+      title: `Revisit interactions between ${second?.name ?? "hotspot 2"} and ${third?.name ?? "hotspot 3"}`,
+      rationale:
+        second && third
+          ? `These hotspots jointly account for ${(second.inclusivePct + third.inclusivePct).toFixed(2)}% inclusive time and likely share avoidable repeated work.`
+          : "Investigate top hotspot interactions to remove redundant stack depth and repeated computation.",
+      impact: "high",
+      effort: "medium",
+      confidence: confidenceFromPct((second?.inclusivePct ?? 8) + (third?.inclusivePct ?? 6), 50)
     }
-  };
+  ];
+
+  return { quickWins, deepRefactors };
+}
+
+function confidenceFromPct(value: number, max: number): number {
+  const bounded = Math.max(0, Math.min(value / max, 1));
+  return Number((0.4 + bounded * 0.6).toFixed(2));
 }
 
 const port = Number(process.env.API_PORT ?? 3001);

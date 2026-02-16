@@ -18,6 +18,7 @@ export interface Recommendation {
   rationale: string;
   impact: "low" | "medium" | "high";
   effort: "small" | "medium" | "large";
+  confidence: number;
 }
 
 export interface FlamegraphAnalysis {
