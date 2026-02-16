@@ -40,25 +40,14 @@ export default function UploadPage() {
     void fetchHistory();
   }, [fetchHistory]);
 
-  const onSubmit: React.FormEventHandler<HTMLFormElement> = async (event) => {
-    event.preventDefault();
-    setState("loading");
-    setError("");
+  const analyzeFile = useCallback(
+    async (file: File) => {
+      setState("loading");
+      setError("");
 
-    const form = event.currentTarget;
-    const fileInput = form.elements.namedItem("profile") as HTMLInputElement | null;
-    const file = fileInput?.files?.[0];
+      const body = new FormData();
+      body.append("profile", file);
 
-    if (!file) {
-      setState("error");
-      setError("Choose a Speedscope JSON profile first.");
-      return;
-    }
-
-    const body = new FormData();
-    body.append("profile", file);
-
-    try {
       const response = await fetch(`${apiBase}${API_ROUTES.analyze}`, {
         method: "POST",
         body
@@ -73,6 +62,25 @@ export default function UploadPage() {
       setAnalysis(json);
       setState("done");
       await fetchHistory();
+    },
+    [apiBase, fetchHistory]
+  );
+
+  const onSubmit: React.FormEventHandler<HTMLFormElement> = async (event) => {
+    event.preventDefault();
+
+    const form = event.currentTarget;
+    const fileInput = form.elements.namedItem("profile") as HTMLInputElement | null;
+    const file = fileInput?.files?.[0];
+
+    if (!file) {
+      setState("error");
+      setError("Choose a Speedscope JSON profile first.");
+      return;
+    }
+
+    try {
+      await analyzeFile(file);
     } catch (submitError) {
       setState("error");
       setError(submitError instanceof Error ? submitError.message : "Unexpected error");
@@ -146,6 +154,31 @@ export default function UploadPage() {
                 className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {state === "loading" ? "Analyzing..." : "Analyze"}
+              </button>
+              <button
+                type="button"
+                disabled={state === "loading"}
+                onClick={async () => {
+                  try {
+                    const response = await fetch("/sample-profile.json");
+                    if (!response.ok) {
+                      throw new Error("Sample profile is unavailable");
+                    }
+
+                    const text = await response.text();
+                    const sampleFile = new File([text], "sample-profile.json", {
+                      type: "application/json"
+                    });
+
+                    await analyzeFile(sampleFile);
+                  } catch (sampleError) {
+                    setState("error");
+                    setError(sampleError instanceof Error ? sampleError.message : "Unable to analyze sample profile");
+                  }
+                }}
+                className="rounded-xl border border-cyan-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-cyan-200 transition hover:border-cyan-500 hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Try sample profile
               </button>
             </form>
 
