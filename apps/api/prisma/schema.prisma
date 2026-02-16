@@ -1,0 +1,62 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Profile {
+  id         String     @id @default(cuid())
+  filename   String
+  rawJson    Json
+  uploadedAt DateTime   @default(now())
+  analyses   Analysis[]
+}
+
+model Analysis {
+  id              String           @id @default(cuid())
+  profileId       String
+  profile         Profile          @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  createdAt       DateTime         @default(now())
+  totalSamples    Int
+  profileCount    Int
+  hotspots        Hotspot[]
+  recommendations Recommendation[]
+
+  @@index([profileId])
+}
+
+model Hotspot {
+  id          String   @id @default(cuid())
+  analysisId  String
+  analysis    Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  name        String
+  file        String
+  selfTimeMs  Int
+  totalTimeMs Int
+  sampleCount Int
+  rank        Int
+
+  @@index([analysisId])
+}
+
+model Recommendation {
+  id         String             @id @default(cuid())
+  analysisId String
+  analysis   Analysis           @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  tier       RecommendationTier
+  title      String
+  rationale  String
+  impact     String
+  effort     String
+  sortOrder  Int
+
+  @@index([analysisId])
+}
+
+enum RecommendationTier {
+  quick_win
+  deep_refactor
+}

@@ -1,0 +1,65 @@
+:root {
+  color-scheme: light;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  background: radial-gradient(circle at top, #f0f5ff 0%, #f7fafc 45%, #eef2f7 100%);
+  color: #1f2937;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+.page {
+  display: grid;
+  gap: 1rem;
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 2rem 1rem 3rem;
+}
+
+.panel {
+  background: #ffffffd9;
+  border: 1px solid #d4dbe5;
+  border-radius: 12px;
+  padding: 1.25rem;
+  box-shadow: 0 8px 24px rgba(18, 24, 40, 0.08);
+}
+
+.upload-form {
+  margin-top: 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+button {
+  border: 0;
+  border-radius: 10px;
+  padding: 0.65rem 1rem;
+  font-weight: 600;
+  background: #0f766e;
+  color: #fff;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+ul {
+  padding-left: 1.2rem;
+}
+
+li p {
+  margin: 0.35rem 0 0;
+}
+
+.error {
+  color: #b91c1c;
+}
