@@ -6,6 +6,8 @@ export interface Hotspot {
   selfTimeMs: number;
   totalTimeMs: number;
   sampleCount: number;
+  inclusivePct: number;
+  exclusivePct: number;
   rank: number;
 }
 

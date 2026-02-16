@@ -9,6 +9,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "echo 'no lint configured for api'",
+    "test": "vitest run",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
   },
@@ -21,9 +22,10 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@types/node": "^22.10.5",
     "prisma": "^6.3.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
-    "@types/node": "^22.10.5"
+    "vitest": "^3.0.5"
   }
 }
